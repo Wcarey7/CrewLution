@@ -1,0 +1,44 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+env/
+venv/
+.venv/
+ENV/
+
+# Django
+db.sqlite3
+*.log
+media/
+media-images/
+cache/
+static/CACHE
+staticfiles/
+celerybeat-schedule
+local_settings.py
+.env
+server.log
+dump.rdb
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+coverage.xml
+
+# Logs
+logs/
+*.log

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% block title %}CrewLution{% endblock %}</title>
+        {% load static %}
+        <link rel="stylesheet" href="{% static 'common/css/app.css' %}">
+        {% block extra_css %}{% endblock %}
+    </head>
+    <body class="marketing-body">
+        <header class="marketing-header">
+            <div class="container marketing-header__inner">
+                <a href="{% url 'marketing:home' %}" class="marketing-logo">CrewLution</a>
+                <nav class="marketing-nav">
+                    <a href="{% url 'marketing:pricing' %}">Pricing</a>
+                    <!-- 
+                    <a href="">Contact</a>
+                    <a href="" class="btn btn-ghost">Log in</a>
+                    <a href="" class="btn btn-primary">Get started</a> -->
+                </nav>
+            </div>
+        </header>
+        <main class="marketing-main">
+            {% block content %}{% endblock %}
+        </main>
+        <footer class="marketing-footer">
+            <div class="container">
+                <p>&copy; {% now "Y" %} CrewLution. All rights reserved.</p>
+            </div>
+        </footer>
+        {% block extra_js %}{% endblock %}
+    </body>
+
+</html>

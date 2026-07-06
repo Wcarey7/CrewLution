@@ -1,0 +1,269 @@
+// CrewLution database schema for https://dbdiagram.io
+// Import this file at dbdiagram.io/d to visualize.
+// Generated from Django models (accounts, crm, commerce, auth).
+
+Project CrewLution {
+  database_type: "PostgreSQL"
+  Note: "Multi-tenant field-service CRM. All tenant data scoped by company_id."
+}
+
+// ─── Django auth (subset) ───────────────────────────────────────────────────
+
+Table auth_user {
+  id integer [pk, increment]
+  username varchar(150) [unique, not null]
+  email varchar(254)
+  password varchar(128) [not null]
+  first_name varchar(150)
+  last_name varchar(150)
+  is_active boolean [not null, default: true]
+  is_staff boolean [not null, default: false]
+  is_superuser boolean [not null, default: false]
+  date_joined timestamptz [not null]
+  last_login timestamptz
+
+  Note: "Django built-in user model"
+}
+
+// ─── accounts ───────────────────────────────────────────────────────────────
+
+Table accounts_company {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  name varchar(200) [not null]
+  phone varchar(50)
+  website varchar(200)
+  email varchar(254)
+  address1 varchar(200)
+  address2 varchar(200)
+  city varchar(120)
+  state varchar(120)
+  postal_code varchar(40)
+  business_hours jsonb [not null, default: '{}']
+  show_business_hours boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+
+  Note: "Tenant root entity"
+}
+
+Table accounts_companymembership {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  user_id integer [not null, ref: > auth_user.id]
+  role varchar(20) [not null, note: "owner | admin | dispatcher | tech | viewer"]
+  is_active boolean [not null, default: true]
+
+  indexes {
+    (company_id, user_id) [unique, name: "uniq_membership_company_user"]
+    (user_id, is_active)
+    (company_id, is_active)
+  }
+}
+
+Table accounts_companyinvite {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  token_hash varchar(64) [unique, not null]
+  role varchar(20) [not null]
+  created_by_id integer [ref: > auth_user.id]
+  expires_at timestamptz [not null]
+  used_at timestamptz
+  used_by_id integer [ref: > auth_user.id]
+  revoked_at timestamptz
+
+  indexes {
+    (company_id, created_at)
+  }
+
+  Note: "Single-use team invite; raw token never stored"
+}
+
+Table accounts_customerportallink {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  token_hash varchar(64) [unique, not null]
+  created_by_id integer [ref: > auth_user.id]
+  revoked_at timestamptz
+  last_accessed_at timestamptz
+
+  indexes {
+    (company_id, customer_id)
+  }
+
+  Note: "Magic link for read-only client portal"
+}
+
+// ─── crm ────────────────────────────────────────────────────────────────────
+
+Table crm_customer {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  kind varchar(16) [not null, default: "person", note: "person | company"]
+  display_name varchar(200) [not null]
+  company_name varchar(200)
+  email varchar(254)
+  phone varchar(50)
+  is_active boolean [not null, default: true]
+}
+
+Table crm_location {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  label varchar(120)
+  address1 varchar(200)
+  address2 varchar(200)
+  city varchar(120)
+  state varchar(120)
+  postal_code varchar(40)
+  country varchar(120)
+  is_primary boolean [not null, default: false]
+
+  indexes {
+    (company_id, customer_id, is_primary)
+  }
+}
+
+Table crm_contact {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  first_name varchar(120)
+  last_name varchar(120)
+  email varchar(254)
+  phone varchar(50)
+  title varchar(120)
+  is_primary boolean [not null, default: false]
+
+  indexes {
+    (company_id, customer_id, is_primary)
+  }
+}
+
+Table crm_customernote {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  created_by_id integer [ref: > auth_user.id]
+  body text [not null]
+}
+
+Table crm_activityevent {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  actor_id integer [ref: > auth_user.id]
+  verb varchar(64) [not null]
+  message varchar(300)
+
+  indexes {
+    (company_id, customer_id, created_at)
+  }
+}
+
+// ─── commerce ───────────────────────────────────────────────────────────────
+
+Table commerce_quote {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  sequence integer [not null, default: 0, note: "Per-company auto increment"]
+  title varchar(200)
+  status varchar(20) [not null, default: "draft", note: "draft | sent | accepted | declined | expired"]
+  total decimal(12,2) [not null, default: 0]
+  currency varchar(3) [not null, default: "USD"]
+  accepted_at timestamptz
+
+  indexes {
+    (company_id, sequence) [unique, name: "uniq_quote_company_sequence"]
+    (company_id, status)
+    (company_id, customer_id)
+  }
+
+  Note: "Reference: QT-{sequence:05d}"
+}
+
+Table commerce_job {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  location_id integer [ref: > crm_location.id]
+  quote_id integer [ref: > commerce_quote.id]
+  sequence integer [not null, default: 0]
+  title varchar(200)
+  status varchar(20) [not null, default: "draft", note: "draft | scheduled | in_progress | completed | cancelled"]
+  total decimal(12,2) [not null, default: 0]
+  scheduled_start timestamptz
+  scheduled_end timestamptz
+  completed_at timestamptz
+
+  indexes {
+    (company_id, sequence) [unique, name: "uniq_job_company_sequence"]
+    (company_id, status)
+    (company_id, customer_id)
+    (company_id, scheduled_start)
+  }
+
+  Note: "Reference: JB-{sequence:05d}"
+}
+
+Table commerce_invoice {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  customer_id integer [not null, ref: > crm_customer.id]
+  job_id integer [ref: > commerce_job.id]
+  sequence integer [not null, default: 0]
+  title varchar(200)
+  status varchar(20) [not null, default: "draft", note: "draft | sent | paid | void"]
+  total decimal(12,2) [not null, default: 0]
+  due_date date
+  paid_at timestamptz
+
+  indexes {
+    (company_id, sequence) [unique, name: "uniq_invoice_company_sequence"]
+    (company_id, status)
+    (company_id, customer_id)
+  }
+
+  Note: "Reference: INV-{sequence:05d}"
+}
+
+Table commerce_lineitem {
+  id integer [pk, increment]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  company_id integer [not null, ref: > accounts_company.id]
+  quote_id integer [ref: > commerce_quote.id]
+  job_id integer [ref: > commerce_job.id]
+  invoice_id integer [ref: > commerce_invoice.id]
+  description varchar(300) [not null]
+  quantity decimal(10,2) [not null, default: 1]
+  unit_price decimal(12,2) [not null, default: 0]
+  sort_order integer [not null, default: 0]
+
+  Note: "Exactly one of quote_id, job_id, invoice_id set in practice. amount = quantity * unit_price (computed)"
+}

@@ -1,0 +1,2736 @@
+openapi: 3.0.3
+info:
+  title: CrewLution API
+  version: 1.0.0
+  description: |
+    REST API for CrewLution — multi-tenant field-service CRM.
+
+    **Authentication:** Staff endpoints require `Authorization: Bearer <access_token>`.
+    Refresh tokens are issued as HttpOnly cookies on login/signup (`POST /auth/login/`, `/auth/signup/`).
+
+    **Tenancy:** Authenticated staff endpoints require `X-Company-Id` header with the active company ID.
+
+    **Errors:** `{ "detail": "Human-readable message", "code": "machine_code" }`
+
+    See [SDD.md](SDD.md) for architecture and migration phases.
+  contact:
+    name: CrewLution
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Django API
+  - url: https://api.crewlution.example/api/v1
+    description: Production API
+
+tags:
+  - name: Auth
+    description: Login, signup, session, password reset
+  - name: Companies
+    description: Company list and active company switching
+  - name: Dashboard
+    description: Aggregated workflow and performance metrics
+  - name: CRM
+    description: Customers, contacts, locations, notes, activity
+  - name: Quotes
+    description: Quote CRUD and transitions
+  - name: Jobs
+    description: Job CRUD and transitions
+  - name: Invoices
+    description: Invoice CRUD and transitions
+  - name: Schedule
+    description: Calendar month/week views
+  - name: Settings
+    description: Company profile and client hub links
+  - name: Team
+    description: Members and invites
+  - name: Invites
+    description: Public invite accept flow
+  - name: Portal
+    description: Public client portal (token in URL, no Bearer auth)
+  - name: Future
+    description: Planned Phase 3+ endpoints
+
+paths:
+  /auth/login/:
+    post:
+      tags: [Auth]
+      summary: Login
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful; refresh token set as HttpOnly cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: HttpOnly refresh token cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout/:
+    post:
+      tags: [Auth]
+      summary: Logout
+      operationId: authLogout
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Logged out; cookies cleared
+
+  /auth/refresh/:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      operationId: authRefresh
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/signup/:
+    post:
+      tags: [Auth]
+      summary: Sign up
+      operationId: authSignup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: Account created; refresh token set as HttpOnly cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/me/:
+    get:
+      tags: [Auth]
+      summary: Current user and permissions
+      operationId: authMe
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current session context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/password-reset/:
+    post:
+      tags: [Auth]
+      summary: Request password reset email
+      operationId: authPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '202':
+          description: Always accepted (anti-enumeration)
+
+  /auth/password-reset/confirm/:
+    post:
+      tags: [Auth]
+      summary: Confirm password reset
+      operationId: authPasswordResetConfirm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uid, token, password]
+              properties:
+                uid:
+                  type: string
+                token:
+                  type: string
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+      responses:
+        '204':
+          description: Password updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /companies/:
+    get:
+      tags: [Companies]
+      summary: List companies for current user
+      operationId: listCompanies
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Companies via memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CompanySummary'
+
+  /companies/active/:
+    post:
+      tags: [Companies]
+      summary: Set active company
+      operationId: setActiveCompany
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_id]
+              properties:
+                company_id:
+                  type: integer
+      responses:
+        '200':
+          description: Active company updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveCompanyResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /dashboard/:
+    get:
+      tags: [Dashboard]
+      summary: Dashboard aggregates
+      operationId: getDashboard
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Workflow, appointments, and performance metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /customers/:
+    get:
+      tags: [CRM]
+      summary: List customers
+      operationId: listCustomers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search display name, email, or phone
+      responses:
+        '200':
+          description: Paginated customer list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCustomerList'
+    post:
+      tags: [CRM]
+      summary: Create customer (unified Jobber-style)
+      operationId: createCustomer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreateRequest'
+      responses:
+        '201':
+          description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /customers/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [CRM]
+      summary: Get customer
+      operationId: getCustomer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Customer detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [CRM]
+      summary: Update customer
+      operationId: updateCustomer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerUpdateRequest'
+      responses:
+        '200':
+          description: Customer updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [CRM]
+      summary: Delete customer
+      operationId: deleteCustomer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '204':
+          description: Customer deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /customers/{id}/activity/:
+    get:
+      tags: [CRM]
+      summary: Customer activity timeline
+      operationId: listCustomerActivity
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Activity events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedActivityEventList'
+
+  /customers/{id}/contacts/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [CRM]
+      summary: List customer contacts
+      operationId: listCustomerContacts
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Contact list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Contact'
+    post:
+      tags: [CRM]
+      summary: Create contact
+      operationId: createCustomerContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactWrite'
+      responses:
+        '201':
+          description: Contact created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+
+  /customers/{id}/locations/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [CRM]
+      summary: List customer locations
+      operationId: listCustomerLocations
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Location list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Location'
+    post:
+      tags: [CRM]
+      summary: Create location
+      operationId: createCustomerLocation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationWrite'
+      responses:
+        '201':
+          description: Location created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+
+  /customers/{id}/notes/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [CRM]
+      summary: List customer notes
+      operationId: listCustomerNotes
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Notes list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCustomerNoteList'
+    post:
+      tags: [CRM]
+      summary: Create note
+      operationId: createCustomerNote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+      responses:
+        '201':
+          description: Note created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerNote'
+
+  /contacts/:
+    get:
+      tags: [CRM]
+      summary: List all contacts (company-wide)
+      operationId: listContacts
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated contacts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedContactList'
+
+  /contacts/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    patch:
+      tags: [CRM]
+      summary: Update contact
+      operationId: updateContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactWrite'
+      responses:
+        '200':
+          description: Contact updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+    delete:
+      tags: [CRM]
+      summary: Delete contact
+      operationId: deleteContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '204':
+          description: Contact deleted
+
+  /locations/:
+    get:
+      tags: [CRM]
+      summary: List all locations (company-wide)
+      operationId: listLocations
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated locations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLocationList'
+
+  /locations/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    patch:
+      tags: [CRM]
+      summary: Update location
+      operationId: updateLocation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationWrite'
+      responses:
+        '200':
+          description: Location updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+    delete:
+      tags: [CRM]
+      summary: Delete location
+      operationId: deleteLocation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '204':
+          description: Location deleted
+
+  /notes/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    delete:
+      tags: [CRM]
+      summary: Delete note
+      operationId: deleteNote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '204':
+          description: Note deleted
+
+  /quotes/:
+    get:
+      tags: [Quotes]
+      summary: List quotes
+      operationId: listQuotes
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/QuoteStatus'
+        - name: customer
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated quotes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuoteList'
+    post:
+      tags: [Quotes]
+      summary: Create quote
+      operationId: createQuote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuoteWrite'
+      responses:
+        '201':
+          description: Quote created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteDetail'
+
+  /quotes/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [Quotes]
+      summary: Get quote
+      operationId: getQuote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Quote with line items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteDetail'
+    patch:
+      tags: [Quotes]
+      summary: Update quote
+      operationId: updateQuote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuoteWrite'
+      responses:
+        '200':
+          description: Quote updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteDetail'
+
+  /quotes/{id}/accept/:
+    post:
+      tags: [Quotes]
+      summary: Accept quote
+      operationId: acceptQuote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Quote accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /quotes/{id}/create-job/:
+    post:
+      tags: [Quotes]
+      summary: Create job from quote
+      operationId: createJobFromQuote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '201':
+          description: Job created with copied line items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /quotes/{id}/pdf/:
+    get:
+      tags: [Quotes]
+      summary: Download quote PDF
+      operationId: downloadQuotePdf
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /jobs/:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      operationId: listJobs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/JobStatus'
+        - name: customer
+          in: query
+          schema:
+            type: integer
+        - name: scheduled_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: scheduled_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Paginated jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedJobList'
+    post:
+      tags: [Jobs]
+      summary: Create job
+      operationId: createJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobWrite'
+      responses:
+        '201':
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+
+  /jobs/locations/:
+    get:
+      tags: [Jobs]
+      summary: Locations for a customer (job form helper)
+      operationId: jobLocations
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - name: customer
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Locations and primary ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobLocationsResponse'
+
+  /jobs/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [Jobs]
+      summary: Get job
+      operationId: getJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Job with line items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+    patch:
+      tags: [Jobs]
+      summary: Update job
+      operationId: updateJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobWrite'
+      responses:
+        '200':
+          description: Job updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+
+  /jobs/{id}/complete/:
+    post:
+      tags: [Jobs]
+      summary: Mark job completed
+      operationId: completeJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Job completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /jobs/{id}/cancel/:
+    post:
+      tags: [Jobs]
+      summary: Cancel job
+      operationId: cancelJob
+      description: Owner or Admin only
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /jobs/{id}/create-invoice/:
+    post:
+      tags: [Jobs]
+      summary: Create invoice from job
+      operationId: createInvoiceFromJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '201':
+          description: Invoice created with copied line items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /invoices/:
+    get:
+      tags: [Invoices]
+      summary: List invoices
+      operationId: listInvoices
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/InvoiceStatus'
+        - name: customer
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated invoices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInvoiceList'
+    post:
+      tags: [Invoices]
+      summary: Create invoice
+      operationId: createInvoice
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceWrite'
+      responses:
+        '201':
+          description: Invoice created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+
+  /invoices/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      tags: [Invoices]
+      summary: Get invoice
+      operationId: getInvoice
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Invoice with line items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+    patch:
+      tags: [Invoices]
+      summary: Update invoice
+      operationId: updateInvoice
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceWrite'
+      responses:
+        '200':
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+
+  /invoices/{id}/send/:
+    post:
+      tags: [Invoices]
+      summary: Mark invoice sent
+      operationId: sendInvoice
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Invoice marked sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /invoices/{id}/paid/:
+    post:
+      tags: [Invoices]
+      summary: Mark invoice paid
+      operationId: markInvoicePaid
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Invoice marked paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /invoices/{id}/void/:
+    post:
+      tags: [Invoices]
+      summary: Void invoice
+      operationId: voidInvoice
+      description: Owner or Admin only
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Invoice voided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /invoices/{id}/pdf/:
+    get:
+      tags: [Invoices]
+      summary: Download invoice PDF
+      operationId: downloadInvoicePdf
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /schedule/:
+    get:
+      tags: [Schedule]
+      summary: Calendar schedule
+      operationId: getSchedule
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - name: view
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [month, week]
+        - name: month
+          in: query
+          description: Required when view=month (YYYY-MM)
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+        - name: week
+          in: query
+          description: Required when view=week (YYYY-MM-DD, any day in target week)
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Schedule events for range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+
+  /settings/company/:
+    get:
+      tags: [Settings]
+      summary: Get company settings
+      operationId: getCompanySettings
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Company profile and business hours
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySettings'
+    patch:
+      tags: [Settings]
+      summary: Update company settings
+      operationId: updateCompanySettings
+      description: Owner or Admin only
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompanySettingsWrite'
+      responses:
+        '200':
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySettings'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /settings/client-hub/links/:
+    get:
+      tags: [Settings]
+      summary: List client portal links
+      operationId: listPortalLinks
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Portal links (without raw tokens)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PortalLink'
+    post:
+      tags: [Settings]
+      summary: Create portal link
+      operationId: createPortalLink
+      description: Owner or Admin only. Raw token returned once.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id]
+              properties:
+                customer_id:
+                  type: integer
+      responses:
+        '201':
+          description: Link created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalLinkCreated'
+
+  /settings/client-hub/links/{id}/:
+    delete:
+      tags: [Settings]
+      summary: Revoke portal link
+      operationId: revokePortalLink
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '204':
+          description: Link revoked
+
+  /team/members/:
+    get:
+      tags: [Team]
+      summary: List team members
+      operationId: listTeamMembers
+      description: Owner or Admin only
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Active and inactive members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TeamMember'
+
+  /team/members/{id}/:
+    patch:
+      tags: [Team]
+      summary: Update team member
+      operationId: updateTeamMember
+      description: Change role or deactivate/reactivate. Cannot modify owner or self.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMemberUpdate'
+      responses:
+        '200':
+          description: Member updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /team/invites/:
+    get:
+      tags: [Team]
+      summary: List pending invites
+      operationId: listTeamInvites
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      responses:
+        '200':
+          description: Pending invites
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TeamInvite'
+    post:
+      tags: [Team]
+      summary: Create team invite
+      operationId: createTeamInvite
+      description: Raw token and invite URL returned once.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/MembershipRole'
+                expires_in_days:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+                  default: 7
+      responses:
+        '201':
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamInviteCreated'
+
+  /team/invites/{id}/:
+    delete:
+      tags: [Team]
+      summary: Revoke invite
+      operationId: revokeTeamInvite
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '204':
+          description: Invite revoked
+
+  /invites/{token}/accept/:
+    post:
+      tags: [Invites]
+      summary: Accept team invite
+      operationId: acceptTeamInvite
+      description: Authenticated user joins company, or creates account if body includes credentials.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteAcceptRequest'
+      responses:
+        '200':
+          description: Invite accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /portal/{token}/:
+    get:
+      tags: [Portal]
+      summary: Client portal data
+      operationId: getClientPortal
+      description: Public read-only access via opaque URL token. No Bearer auth.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Portal payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /quotes/{id}/send-email/:
+    post:
+      tags: [Future]
+      summary: Email quote PDF (Phase 3)
+      operationId: sendQuoteEmail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '202':
+          description: Email queued
+      x-phase: 3
+
+  /invoices/{id}/send-email/:
+    post:
+      tags: [Future]
+      summary: Email invoice PDF (Phase 3)
+      operationId: sendInvoiceEmail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCompanyId'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '202':
+          description: Email queued
+      x-phase: 3
+
+  /webhooks/stripe/:
+    post:
+      tags: [Future]
+      summary: Stripe webhook (future)
+      operationId: stripeWebhook
+      responses:
+        '200':
+          description: Event processed
+      x-phase: 3
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived access token from login/signup/refresh
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: HttpOnly refresh cookie for token refresh and logout
+
+  parameters:
+    XCompanyId:
+      name: X-Company-Id
+      in: header
+      required: true
+      schema:
+        type: integer
+      description: Active company ID for multi-tenant scoping
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found (includes cross-tenant access)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Invalid state transition
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            detail: Cannot accept quote in current status
+            code: invalid_transition
+
+  schemas:
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+        code:
+          type: string
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    SignupRequest:
+      type: object
+      required: [email, password, company_name]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        company_name:
+          type: string
+          maxLength: 200
+
+    TokenRefreshResponse:
+      type: object
+      required: [access_token, expires_in]
+      properties:
+        access_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Access token lifetime in seconds
+
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+
+    MembershipRole:
+      type: string
+      enum: [owner, admin, dispatcher, tech, viewer]
+
+    Membership:
+      type: object
+      required: [id, company_id, role, is_active]
+      properties:
+        id:
+          type: integer
+        company_id:
+          type: integer
+        company_name:
+          type: string
+        role:
+          $ref: '#/components/schemas/MembershipRole'
+        is_active:
+          type: boolean
+
+    Permissions:
+      type: object
+      properties:
+        can_write_crm:
+          type: boolean
+        can_delete_crm:
+          type: boolean
+        can_manage_team:
+          type: boolean
+
+    AuthResponse:
+      type: object
+      required: [access_token, expires_in, user, memberships, active_company_id]
+      properties:
+        access_token:
+          type: string
+        expires_in:
+          type: integer
+        user:
+          $ref: '#/components/schemas/User'
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/Membership'
+        active_company_id:
+          type: integer
+          nullable: true
+
+    MeResponse:
+      type: object
+      required: [user, memberships, active_company_id, permissions]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/Membership'
+        active_company_id:
+          type: integer
+          nullable: true
+        permissions:
+          $ref: '#/components/schemas/Permissions'
+
+    ActiveCompanyResponse:
+      type: object
+      required: [active_company_id, membership]
+      properties:
+        active_company_id:
+          type: integer
+        membership:
+          $ref: '#/components/schemas/Membership'
+
+    CompanySummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
+    BusinessHoursDay:
+      type: object
+      properties:
+        open:
+          type: string
+          description: HH:MM (24h)
+          example: "09:00"
+        close:
+          type: string
+          description: HH:MM (24h)
+          example: "17:00"
+        closed:
+          type: boolean
+          default: false
+
+    BusinessHours:
+      type: object
+      description: Keys are weekday names (monday … sunday)
+      additionalProperties:
+        $ref: '#/components/schemas/BusinessHoursDay'
+
+    CompanySettings:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+        website:
+          type: string
+          format: uri
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        business_hours:
+          $ref: '#/components/schemas/BusinessHours'
+        show_business_hours:
+          type: boolean
+
+    CompanySettingsWrite:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+        website:
+          type: string
+          format: uri
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        business_hours:
+          $ref: '#/components/schemas/BusinessHours'
+        show_business_hours:
+          type: boolean
+
+    WorkflowCounts:
+      type: object
+      properties:
+        quotes_draft:
+          type: integer
+        quotes_changes_requested:
+          type: integer
+          description: Sent quotes awaiting response
+        quotes_approved:
+          type: integer
+          description: Accepted quotes
+        jobs_active:
+          type: integer
+        jobs_action_required:
+          type: integer
+        jobs_requires_invoicing:
+          type: integer
+        invoices_draft:
+          type: integer
+        invoices_awaiting_payment:
+          type: integer
+        invoices_past_due:
+          type: integer
+
+    AppointmentItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        reference:
+          type: string
+          example: JB-00012
+        title:
+          type: string
+        customer_name:
+          type: string
+        scheduled_start:
+          type: string
+          format: date-time
+        scheduled_end:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        location_label:
+          type: string
+          nullable: true
+
+    Appointments:
+      type: object
+      properties:
+        total:
+          type: integer
+        active:
+          type: integer
+        completed:
+          type: integer
+        overdue:
+          type: integer
+        remaining:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppointmentItem'
+
+    BusinessPerformance:
+      type: object
+      properties:
+        receivables:
+          type: string
+          format: decimal
+          description: Sum of sent invoices (last 30 days)
+        upcoming_jobs:
+          type: integer
+          description: Jobs scheduled in next 7 days
+        revenue:
+          type: string
+          format: decimal
+          description: Paid invoice revenue MTD
+
+    Dashboard:
+      type: object
+      properties:
+        workflow:
+          $ref: '#/components/schemas/WorkflowCounts'
+        appointments:
+          $ref: '#/components/schemas/Appointments'
+        performance:
+          $ref: '#/components/schemas/BusinessPerformance'
+
+    CustomerKind:
+      type: string
+      enum: [person, company]
+
+    ContactSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        full_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+
+    LocationSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        address1:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+
+    Customer:
+      type: object
+      required: [id, display_name, kind, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/CustomerKind'
+        display_name:
+          type: string
+        company_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        is_active:
+          type: boolean
+        primary_contact:
+          $ref: '#/components/schemas/ContactSummary'
+          nullable: true
+        primary_location:
+          $ref: '#/components/schemas/LocationSummary'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CustomerDetail:
+      allOf:
+        - $ref: '#/components/schemas/Customer'
+        - type: object
+          properties:
+            contacts_count:
+              type: integer
+            locations_count:
+              type: integer
+            notes_count:
+              type: integer
+
+    CustomerCreateRequest:
+      type: object
+      required: [display_name]
+      properties:
+        kind:
+          $ref: '#/components/schemas/CustomerKind'
+        display_name:
+          type: string
+        company_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        contact:
+          $ref: '#/components/schemas/ContactWrite'
+          description: Optional primary contact created with customer
+        location:
+          $ref: '#/components/schemas/LocationWrite'
+          description: Optional primary location created with customer
+
+    CustomerUpdateRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/CustomerKind'
+        display_name:
+          type: string
+        company_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        is_active:
+          type: boolean
+
+    PaginatedCustomerList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Customer'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    Contact:
+      type: object
+      properties:
+        id:
+          type: integer
+        customer_id:
+          type: integer
+        first_name:
+          type: string
+        last_name:
+          type: string
+        full_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        title:
+          type: string
+        is_primary:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ContactWrite:
+      type: object
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        title:
+          type: string
+        is_primary:
+          type: boolean
+
+    PaginatedContactList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Contact'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    Location:
+      type: object
+      properties:
+        id:
+          type: integer
+        customer_id:
+          type: integer
+        label:
+          type: string
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        country:
+          type: string
+        is_primary:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LocationWrite:
+      type: object
+      properties:
+        label:
+          type: string
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        country:
+          type: string
+        is_primary:
+          type: boolean
+
+    PaginatedLocationList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Location'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    CustomerNote:
+      type: object
+      properties:
+        id:
+          type: integer
+        customer_id:
+          type: integer
+        body:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/User'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedCustomerNoteList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerNote'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ActivityVerb:
+      type: string
+      enum:
+        - created_customer
+        - updated_customer
+        - added_note
+        - created_contact
+        - updated_contact
+        - created_location
+        - updated_location
+
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        customer_id:
+          type: integer
+        verb:
+          $ref: '#/components/schemas/ActivityVerb'
+        message:
+          type: string
+        actor:
+          $ref: '#/components/schemas/User'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedActivityEventList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityEvent'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    LineItem:
+      type: object
+      required: [description, quantity, unit_price, amount]
+      properties:
+        id:
+          type: integer
+        description:
+          type: string
+          maxLength: 300
+        quantity:
+          type: string
+          format: decimal
+          example: "1.00"
+        unit_price:
+          type: string
+          format: decimal
+          example: "150.00"
+        amount:
+          type: string
+          format: decimal
+          description: Computed as quantity × unit_price
+          readOnly: true
+        sort_order:
+          type: integer
+
+    LineItemWrite:
+      type: object
+      required: [description, quantity, unit_price]
+      properties:
+        id:
+          type: integer
+          description: Include to update existing line item; omit to create
+        description:
+          type: string
+        quantity:
+          type: string
+          format: decimal
+        unit_price:
+          type: string
+          format: decimal
+        sort_order:
+          type: integer
+
+    QuoteStatus:
+      type: string
+      enum: [draft, sent, accepted, declined, expired]
+
+    Quote:
+      type: object
+      properties:
+        id:
+          type: integer
+        reference:
+          type: string
+          example: QT-00001
+        customer_id:
+          type: integer
+        customer_name:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/QuoteStatus'
+        total:
+          type: string
+          format: decimal
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          default: USD
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    QuoteDetail:
+      allOf:
+        - $ref: '#/components/schemas/Quote'
+        - type: object
+          properties:
+            line_items:
+              type: array
+              items:
+                $ref: '#/components/schemas/LineItem'
+
+    QuoteWrite:
+      type: object
+      required: [customer_id]
+      properties:
+        customer_id:
+          type: integer
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/QuoteStatus'
+        currency:
+          type: string
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItemWrite'
+
+    PaginatedQuoteList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Quote'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    JobStatus:
+      type: string
+      enum: [draft, scheduled, in_progress, completed, cancelled]
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: integer
+        reference:
+          type: string
+          example: JB-00001
+        customer_id:
+          type: integer
+        customer_name:
+          type: string
+        location_id:
+          type: integer
+          nullable: true
+        quote_id:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        total:
+          type: string
+          format: decimal
+        scheduled_start:
+          type: string
+          format: date-time
+          nullable: true
+        scheduled_end:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    JobDetail:
+      allOf:
+        - $ref: '#/components/schemas/Job'
+        - type: object
+          properties:
+            line_items:
+              type: array
+              items:
+                $ref: '#/components/schemas/LineItem'
+
+    JobWrite:
+      type: object
+      required: [customer_id]
+      properties:
+        customer_id:
+          type: integer
+        location_id:
+          type: integer
+          nullable: true
+        quote_id:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        scheduled_start:
+          type: string
+          format: date-time
+          nullable: true
+        scheduled_end:
+          type: string
+          format: date-time
+          nullable: true
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItemWrite'
+
+    PaginatedJobList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    JobLocationsResponse:
+      type: object
+      properties:
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              label:
+                type: string
+              primary_id:
+                type: integer
+                nullable: true
+        primary_id:
+          type: integer
+          nullable: true
+
+    InvoiceStatus:
+      type: string
+      enum: [draft, sent, paid, void]
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: integer
+        reference:
+          type: string
+          example: INV-00001
+        customer_id:
+          type: integer
+        customer_name:
+          type: string
+        job_id:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        total:
+          type: string
+          format: decimal
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InvoiceDetail:
+      allOf:
+        - $ref: '#/components/schemas/Invoice'
+        - type: object
+          properties:
+            line_items:
+              type: array
+              items:
+                $ref: '#/components/schemas/LineItem'
+
+    InvoiceWrite:
+      type: object
+      required: [customer_id]
+      properties:
+        customer_id:
+          type: integer
+        job_id:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItemWrite'
+
+    PaginatedInvoiceList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invoice'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ScheduleEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        customer_name:
+          type: string
+        reference:
+          type: string
+
+    ScheduleResponse:
+      type: object
+      properties:
+        view:
+          type: string
+          enum: [month, week]
+        range_start:
+          type: string
+          format: date
+        range_end:
+          type: string
+          format: date
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleEvent'
+
+    PortalLink:
+      type: object
+      properties:
+        id:
+          type: integer
+        customer_id:
+          type: integer
+        customer_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_accessed_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_valid:
+          type: boolean
+
+    PortalLinkCreated:
+      allOf:
+        - $ref: '#/components/schemas/PortalLink'
+        - type: object
+          required: [raw_token, portal_url]
+          properties:
+            raw_token:
+              type: string
+              description: Shown once; not stored server-side
+            portal_url:
+              type: string
+              format: uri
+
+    TeamMember:
+      type: object
+      properties:
+        id:
+          type: integer
+        user:
+          $ref: '#/components/schemas/User'
+        role:
+          $ref: '#/components/schemas/MembershipRole'
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    TeamMemberUpdate:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/MembershipRole'
+        is_active:
+          type: boolean
+
+    TeamInvite:
+      type: object
+      properties:
+        id:
+          type: integer
+        role:
+          $ref: '#/components/schemas/MembershipRole'
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        is_valid:
+          type: boolean
+
+    TeamInviteCreated:
+      allOf:
+        - $ref: '#/components/schemas/TeamInvite'
+        - type: object
+          required: [raw_token, invite_url]
+          properties:
+            raw_token:
+              type: string
+            invite_url:
+              type: string
+              format: uri
+
+    InviteAcceptRequest:
+      type: object
+      description: Omit body when already authenticated
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        first_name:
+          type: string
+        last_name:
+          type: string
+
+    PortalQuoteSummary:
+      type: object
+      properties:
+        reference:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/QuoteStatus'
+        total:
+          type: string
+          format: decimal
+        created_at:
+          type: string
+          format: date-time
+
+    PortalJobSummary:
+      type: object
+      properties:
+        reference:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        scheduled_start:
+          type: string
+          format: date-time
+          nullable: true
+
+    PortalInvoiceSummary:
+      type: object
+      properties:
+        reference:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        total:
+          type: string
+          format: decimal
+        due_date:
+          type: string
+          format: date
+          nullable: true
+
+    PortalResponse:
+      type: object
+      properties:
+        company:
+          type: object
+          properties:
+            name:
+              type: string
+            phone:
+              type: string
+            email:
+              type: string
+            show_business_hours:
+              type: boolean
+            business_hours:
+              $ref: '#/components/schemas/BusinessHours'
+        customer:
+          type: object
+          properties:
+            display_name:
+              type: string
+        quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortalQuoteSummary'
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortalJobSummary'
+        invoices:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortalInvoiceSummary'

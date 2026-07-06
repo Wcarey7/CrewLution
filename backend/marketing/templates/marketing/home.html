@@ -1,0 +1,28 @@
+{% extends "marketing/base.html" %}
+{% block title %}CrewLution — Field Service CRM{% endblock %}
+{% block content %}
+<section class="hero container">
+    <h1>Run your field service business in one place</h1>
+    <p class="hero__subtitle">
+        Customers, quotes, jobs, scheduling, and invoices — built for solo operators and small teams.
+    </p>
+    <div class="hero__actions">
+        <a href="" class="btn btn-primary btn-lg">Start free</a>
+        <a href="{% url 'marketing:pricing' %}" class="btn btn-secondary btn-lg">View pricing</a>
+    </div>
+</section>
+<section class="features container">
+    <div class="feature-card">
+        <h2>CRM</h2>
+        <p>Customers, contacts, locations, and activity in one hub.</p>
+    </div>
+    <div class="feature-card">
+        <h2>Jobs &amp; scheduling</h2>
+        <p>Quote to job to invoice with month and week calendar views.</p>
+    </div>
+    <div class="feature-card">
+        <h2>Client portal</h2>
+        <p>Share quotes, jobs, and invoices with magic links.</p>
+    </div>
+</section>
+{% endblock %}

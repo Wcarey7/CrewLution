@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dashboard — CrewLution</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'common/css/app.css' %}">
+</head>
+<body>
+  <main class="container">
+    <h1>Dashboard</h1>
+    <p>Welcome, {{ user.get_username }}.</p>
+  </main>
+</body>
+</html>

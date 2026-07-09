@@ -22,4 +22,6 @@ urlpatterns = [
 
     # Public marketing site / Landing page
     path("", include("marketing.urls", namespace="marketing")),
+    path("app/", include("config.app_urls")),
+    path("accounts/", include("accounts.urls", namespace="accounts")),
 ]

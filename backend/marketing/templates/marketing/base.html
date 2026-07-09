@@ -14,15 +14,20 @@
             <div class="container marketing-header__inner">
                 <a href="{% url 'marketing:home' %}" class="marketing-logo">CrewLution</a>
                 <nav class="marketing-nav">
-                    <a href="{% url 'marketing:pricing' %}">Pricing</a>
-                    <!-- 
-                    <a href="">Contact</a>
-                    <a href="" class="btn btn-ghost">Log in</a>
-                    <a href="" class="btn btn-primary">Get started</a> -->
+
+                    <a href="{% url 'accounts:login' %}" class="btn btn-ghost">Log in</a>
+                    <a href="{% url 'accounts:signup' %}" class="btn btn-primary">Get started</a>
                 </nav>
             </div>
         </header>
         <main class="marketing-main">
+            {% if messages %}
+            <div class="container messages">
+                {% for message in messages %}
+                <p class="message message-{{ message.tags }}">{{ message }}</p>
+                {% endfor %}
+            </div>
+            {% endif %}
             {% block content %}{% endblock %}
         </main>
         <footer class="marketing-footer">

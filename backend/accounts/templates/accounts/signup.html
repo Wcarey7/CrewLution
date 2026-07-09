@@ -1,10 +1,10 @@
 {% extends "marketing/base.html" %}
 
-{% block title %}Log in — CrewLution{% endblock %}
+{% block title %}Sign up — CrewLution{% endblock %}
 
 {% block content %}
 <section class="container auth-form">
-  <h1>Log in</h1>
+  <h1>Create your account</h1>
 
   {% if form.non_field_errors %}
   <div class="form-errors">
@@ -14,12 +14,12 @@
   </div>
   {% endif %}
 
-  <form method="post" action="{% url 'accounts:login' %}">
+  <form method="post" action="{% url 'accounts:signup' %}">
     {% csrf_token %}
     {{ form.as_p }}
-    <button type="submit" class="btn btn-primary">Log in</button>
+    <button type="submit" class="btn btn-primary">Sign up</button>
   </form>
 
-  <p>Need an account? <a href="{% url 'accounts:signup' %}">Sign up</a></p>
+  <p>Already have an account? <a href="{% url 'accounts:login' %}">Log in</a></p>
 </section>
 {% endblock %}

@@ -1,13 +1,13 @@
+"""
+URL router for the authenticated product — everything under /app/.
+app_urls.py is the front door to the logged-in CrewLution app at /app/, 
+kept separate from marketing and auth so the URL structure stays clean
+"""
 from django.urls import path
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
-
-
-@login_required
-def dashboard_view(request):
-  return render(request, "common/dashboard.html")
+from commerce.views.dashboard import dashboard_view
 
 app_name = "app"
+
 urlpatterns = [
-  path("", dashboard_view, name="dashboard"),
+    path("", dashboard_view, name="dashboard"),
 ]

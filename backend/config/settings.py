@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'common.apps.CommonConfig',
     'marketing.apps.MarketingConfig',
     'accounts.apps.AccountsConfig',
+    'commerce.apps.CommerceConfig',
 ]
 
 MIDDLEWARE = [

@@ -133,6 +133,11 @@ LOGIN_URL = "accounts:login"
 LOGIN_REDIRECT_URL = "app:dashboard"
 LOGOUT_REDIRECT_URL = "marketing:home"
 
+# Obscure Django admin path (security through obscurity + staff-only gate).
+# Example: DJANGO_ADMIN_URL=ops-a7f3b9c2  → /ops-a7f3b9c2/
+_admin_url = config("DJANGO_ADMIN_URL", default="admin").strip().strip("/")
+ADMIN_URL = f"{_admin_url}/"
+
 INTERNAL_IPS = [
     "127.0.0.1",
     "localhost",
